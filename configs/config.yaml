@@ -1,0 +1,13 @@
+http:
+  port: 8080
+  timeout: 3s
+storage:
+  connection_string: postgres://user:password@postgres:5432/microservices?sslmode=disable
+logger:
+  level: info
+  add_source: true
+metrics:
+  port: 8083
+  timeout: 3s
+gracefull_shutdown:
+  timeout: 5s
