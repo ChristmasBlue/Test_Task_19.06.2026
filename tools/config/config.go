@@ -13,4 +13,8 @@ type Config interface {
 	LoggerLevel() string
 	StorageConnStr() string
 	GracefullShutdownTimeout() time.Duration
+	LifeIdleConns() time.Duration
+	MaxOpenConns() int
+	MaxIdleConns() int
+	LifeConns() time.Duration
 }

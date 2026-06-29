@@ -70,21 +70,23 @@ func (s *Server) registerRoutes() {
 
 	router.Use(metrics.HTTPMetricsMiddleware())
 
-	router.POST(fmt.Sprintf("%s%s", basePath, "login"), s.Login)
-	router.POST(fmt.Sprintf("%s%s", basePath, "register"), s.Register)
+	router.POST(fmt.Sprintf("%s%s", basePath, "/login"), s.Login)
+	router.POST(fmt.Sprintf("%s%s", basePath, "/register"), s.Register)
 
 	api := router.Group(basePath)
 	api.Use(AuthMiddleware(s.config.TokenSecret()))
-	
+
 	api.GET("/teams", s.GetTeams)
 	api.POST("/teams", s.CreateTeam)
 	api.GET("/teams/:id", s.GetTeamByID)
 	api.POST("/teams/:id/invite", s.AddMember)
+	api.GET("/teams/:id/members", s.GetTeamMembers)
 	api.POST("/tasks", s.CreateTask)
 	api.GET("/tasks/:id", s.GetTaskByID)
 	api.PUT("/tasks/:id", s.UpdateTaskByID)
-	api.POST("/tasks/:id/comments", s.AddComment)
 	api.GET("/tasks/:id/history", s.GetHistory)
-
+	api.GET("/teams/:id/tasks", s.GetTasksByTeam)
+	api.POST("/tasks/:id/comments", s.AddComment)
+	api.GET("/tasks/:id/comments", s.GetCommentsByTask)
 	s.router.Handler = router
 }

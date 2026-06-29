@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	configPath = ""
+	configPath = "D:\\go_projects\\Test_task3\\configs\\config.yaml"
 )
 
 func main() {

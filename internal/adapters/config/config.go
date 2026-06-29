@@ -63,3 +63,19 @@ func (c *Config) TokenDuration() time.Duration {
 func (c *Config) GracefullShutdownTimeout() time.Duration {
 	return c.Duration("gracefull_shutdown.timeout")
 }
+
+func (c *Config) LifeIdleConns() time.Duration {
+	return c.Duration("storage.time_life_idle_conns")
+}
+
+func (c *Config) MaxOpenConns() int {
+	return c.Koanf.Int("storage.max_conns")
+}
+
+func (c *Config) MaxIdleConns() int {
+	return c.Koanf.Int("storage.max_idle_conns")
+}
+
+func (c *Config) LifeConns() time.Duration {
+	return c.Duration("storage.time_life_conns")
+}

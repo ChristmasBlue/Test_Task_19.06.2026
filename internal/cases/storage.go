@@ -5,25 +5,45 @@ import (
 	"test_task/internal/entities"
 )
 
-type Storage interface {
+// Repository — основной интерфейс репозитория
+type Repository interface {
+
+	// InTx выполняет функцию в транзакции
+	InTx(ctx context.Context, fn func(ctx context.Context, repo Repository) error) error
+
+	Start() error
+	Stop(ctx context.Context) error
+	Ping(ctx context.Context) error
+
+	// ========== USER ==========
+	CreateUser(ctx context.Context, name, email, hashPass string) (*entities.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*entities.User, error)
 	GetUserByID(ctx context.Context, id int64) (*entities.User, error)
-	CreateUser(ctx context.Context, name, email, hashPass string) (*entities.User, error)
-	//AddTeamToUser(ctx context.Context, user *entities.User, team *entities.Team) error
 
-	GetTeam(ctx context.Context, teamID int64) (*entities.Team, error)
-	CreateTeam(ctx context.Context, userID int64, name string) (*entities.Team, error)
-	GetAllTeams(ctx context.Context, userID int64) ([]*entities.Team, error)
-	//AddTaskTeam(ctx context.Context, task *entities.Task, team *entities.Team) error
-	AddMemberInTeam(ctx context.Context, userID, teamID int64) error
+	// ========== TEAM ==========
+	CreateTeam(ctx context.Context, name string, ownerID int64) (*entities.Team, error)
+	GetTeamByID(ctx context.Context, id int64) (*entities.Team, error)
+	GetUserTeams(ctx context.Context, userID int64) ([]int64, error)
+	GetTeamsByIDs(ctx context.Context, ids []int64) ([]*entities.Team, error)
 
-	GetTask(ctx context.Context, taskID int64) (*entities.Task, error)
-	CreateTask(ctx context.Context, user, assigneeID, teamID int64, title, description string) (*entities.Task, error)
+	// ========== TEAM MEMBER ==========
+	AddMember(ctx context.Context, userID, teamID int64, role string) error
+	GetTeamMembers(ctx context.Context, teamID int64) ([]*entities.TeamMember, error)
+	IsAdminOrOwner(ctx context.Context, userID, teamID int64) (bool, error)
+	IsMember(ctx context.Context, userID, teamID int64) (bool, error)
+	GetMemberRole(ctx context.Context, userID, teamID int64) (string, error)
+
+	// ========== TASK ==========
+	CreateTask(ctx context.Context, userID, assigneeID, teamID int64, title, description, status string) (*entities.Task, error)
+	GetTaskByID(ctx context.Context, id int64) (*entities.Task, error)
+	GetTasksByTeam(ctx context.Context, teamID int64, limit, offset int) ([]*entities.Task, error)
 	UpdateTask(ctx context.Context, task *entities.Task) error
-	AddComment(ctx context.Context, taskID int64, comment *entities.Comment) error
 
-	//GetTaskByFilters(ctx context.Context) ([]*entities.Task, error)
+	// ========== TASK HISTORY ==========
+	AddHistoryRecord(ctx context.Context, record *entities.TaskHistory) error
+	GetTaskHistory(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskHistory, error)
 
-	GetHistory(ctx context.Context, taskID int64) (*entities.History, error)
-	AddHistory(ctx context.Context, record *entities.Record) error
+	// ========== TASK COMMENT ==========
+	AddComment(ctx context.Context, comment *entities.TaskComment) error
+	GetCommentsByTask(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskComment, error)
 }

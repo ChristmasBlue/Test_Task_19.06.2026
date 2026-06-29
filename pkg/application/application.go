@@ -1,7 +1,7 @@
 package application
 
 import (
-	"test_task/internal/adapters/storage/pg"
+	"test_task/internal/adapters/storage/ms"
 	"test_task/internal/cases"
 	"test_task/internal/ports"
 	"test_task/internal/ports/http/public"
@@ -12,7 +12,7 @@ import (
 
 type App struct {
 	cfg     config.Config
-	storage cases.Storage
+	storage cases.Repository
 	service ports.Service
 
 	server port.Port
@@ -26,10 +26,10 @@ func New(cfg config.Config) *App {
 
 func (app *App) Run() {
 	app.initStore()
-	app.initServer()
 	app.initService()
+	app.initServer()
 
-	baseApp := baseApp.NewBuilder(app.cfg).WithLogger().WithMetricsPort().AddStarters(app.server.Start).AddWaiters(app.server.Stop).Build()
+	baseApp := baseApp.NewBuilder(app.cfg).WithLogger().WithMetricsPort().AddStarters(app.server.Start).AddWaiters(app.server.Stop, app.storage.Stop).Build()
 
 	if err := baseApp.Run(); err != nil {
 		panic(err)
@@ -37,9 +37,7 @@ func (app *App) Run() {
 }
 
 func (app *App) initStore() {
-	connStr := app.cfg.StorageConnStr()
-
-	st, err := pg.NewStorage(connStr)
+	st, err := ms.NewStorage(app.cfg)
 	if err != nil {
 		panic(err)
 	}

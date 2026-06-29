@@ -2,22 +2,22 @@ package cases
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"slices"
 	"test_task/internal/entities"
+	"test_task/pkg/dto"
 	"test_task/pkg/tool"
 	"test_task/tools/config"
+	"time"
 
 	"github.com/pkg/errors"
 )
 
 type Service struct {
-	Storage Storage
+	Storage Repository
 	Config  config.Config
 }
 
-func NewService(storage Storage, cfg config.Config) (*Service, error) {
+func NewService(storage Repository, cfg config.Config) (*Service, error) {
 	if storage == nil {
 		return nil, errors.Wrap(entities.ErrInvalidParam, "storage not set")
 	}
@@ -49,9 +49,12 @@ func (s *Service) CreateUser(ctx context.Context, name, email, password string) 
 		return nil, errors.Wrap(entities.ErrInvalidParam, "password is empty")
 	}
 
-	if _, err := s.Storage.GetUserByEmail(ctx, email); err != nil {
+	if _, err := s.Storage.GetUserByEmail(ctx, email); err == nil {
+		return nil, errors.Wrap(entities.ErrInvalidParam, "email is exist")
+
+	} else if !errors.Is(err, entities.ErrNotFound) {
 		slog.Error("GetUserByEmail", "err", err)
-		return nil, errors.Wrap(err, "email is exist")
+		return nil, errors.Wrap(entities.ErrInvalidParam, "failed to check user existence")
 	}
 
 	hashPass, err := tool.HashingPass(password)
@@ -132,7 +135,7 @@ func (s *Service) GetUserByID(ctx context.Context, id int64) (*entities.User, er
 	return user, nil
 }
 
-func (s *Service) AddMember(ctx context.Context, userID int64, teamID, memberID int64) error {
+func (s *Service) AddMember(ctx context.Context, userID, teamID, memberID int64, role string) error {
 	slog.Info("AddMember")
 	if memberID <= 0 {
 		slog.Error("AddMember", "err", "invalid memberID")
@@ -144,40 +147,37 @@ func (s *Service) AddMember(ctx context.Context, userID int64, teamID, memberID 
 		return errors.Wrap(entities.ErrInvalidParam, "teamID is invalid")
 	}
 
-	team, err := s.Storage.GetTeam(ctx, teamID)
+	if role == "" {
+		role = "member"
+	}
+
+	_, err := s.Storage.GetTeamByID(ctx, teamID)
 	if err != nil {
 		slog.Error("GetTeam", "err", err)
 		return errors.Wrap(err, "get team")
 	}
 
-	if team.OwnerID != userID {
-		return errors.Wrap(entities.ErrInvalidParam, "inviterID is not owner of team")
+	isAdmin, err := s.Storage.IsAdminOrOwner(ctx, userID, teamID)
+	if err != nil {
+		slog.Error("IsAdminOrOwner", "err", err)
+		return errors.Wrap(err, "failed to check user permissions")
 	}
 
-	member, err := s.Storage.GetUserByID(ctx, memberID)
+	if !isAdmin {
+		return errors.Wrap(entities.ErrInvalidParam, "user is not an admin")
+	}
+
+	_, err = s.Storage.GetUserByID(ctx, memberID)
 	if err != nil {
 		slog.Error("GetUserByID", "err", err)
 		return errors.Wrap(err, "failed to get member")
 	}
 
-	if !slices.Contains(team.MembersID, memberID) || !slices.Contains(member.TeamsID, team.ID) {
-		err = s.Storage.AddMemberInTeam(ctx, memberID, teamID)
-		if err != nil {
-			slog.Error("AddMember", "err", err)
-			return errors.Wrap(err, "add member team failed")
-		}
+	err = s.Storage.AddMember(ctx, memberID, teamID, role)
 
-		err = team.AddMemberID(member.ID)
-		if err != nil {
-			slog.Error("AddMember", "err", err)
-			return errors.Wrap(err, "add member failed")
-		}
-
-		err = member.AddTeamID(team.ID)
-		if err != nil {
-			slog.Error("AddMember", "err", err)
-			return errors.Wrap(err, "add member failed")
-		}
+	if err != nil {
+		slog.Error("AddMember", "err", err)
+		return errors.Wrap(err, "failed to add member")
 	}
 
 	return nil
@@ -190,7 +190,25 @@ func (s *Service) CreateTeam(ctx context.Context, userID int64, name string) (*e
 		return nil, errors.Wrap(entities.ErrInvalidParam, "name is empty")
 	}
 
-	team, err := s.Storage.CreateTeam(ctx, userID, name)
+	var team *entities.Team
+	var err error
+
+	err = s.Storage.InTx(ctx, func(ctx context.Context, repo Repository) error {
+		team, err = repo.CreateTeam(ctx, name, userID)
+		if err != nil {
+			slog.Error("CreateTeam", "err", err)
+			return errors.Wrap(err, "create team failed")
+		}
+
+		err = repo.AddMember(ctx, userID, team.GetID(), "owner")
+		if err != nil {
+			slog.Error("AddMember", "err", err)
+			return errors.Wrap(err, "add member failed")
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		slog.Error("CreateTeam", "err", err)
 		return nil, errors.Wrap(err, "create team failed")
@@ -205,30 +223,61 @@ func (s *Service) CreateTeam(ctx context.Context, userID int64, name string) (*e
 	return team, nil
 }
 
-func (s *Service) GetTeams(ctx context.Context, userID int64) ([]*entities.Team, error) {
+func (s *Service) GetTeams(ctx context.Context, userID int64) ([]dto.TeamWithRole, error) {
 	slog.Info("GetTeams")
-	teams, err := s.Storage.GetAllTeams(ctx, userID)
+
+	teamIDs, err := s.Storage.GetUserTeams(ctx, userID)
 	if err != nil {
-		slog.Error("GetTeams", "err", err)
-		return nil, errors.Wrap(err, "get all teams failed")
+		slog.Error("GetUserTeams", "err", err)
+		return nil, errors.Wrap(err, "failed to get user teams")
 	}
 
-	return teams, nil
+	if len(teamIDs) == 0 {
+		return []dto.TeamWithRole{}, nil
+	}
+
+	teams, err := s.Storage.GetTeamsByIDs(ctx, teamIDs)
+	if err != nil {
+		slog.Error("GetTeamsByIDs", "err", err)
+		return nil, errors.Wrap(err, "failed to get teams info")
+	}
+
+	result := make([]dto.TeamWithRole, 0, len(teams))
+	for _, team := range teams {
+		role, err := s.Storage.GetMemberRole(ctx, userID, team.ID)
+		if err != nil {
+			slog.Error("GetMemberRole", "err", err, "team_id", team.ID)
+			return nil, errors.Wrap(err, "failed to get member role")
+		}
+
+		result = append(result, dto.TeamWithRole{
+			Team: team,
+			Role: role,
+		})
+	}
+
+	return result, nil
 }
 
-func (s *Service) GetTeamByID(ctx context.Context, userID, teamID int64) (*entities.Team, error) {
+func (s *Service) GetTeamByID(ctx context.Context, teamID int64) (*entities.Team, error) {
 	slog.Info("GetTeamByID")
-	team, err := s.Storage.GetTeam(ctx, teamID)
+	team, err := s.Storage.GetTeamByID(ctx, teamID)
 	if err != nil {
 		slog.Error("GetTeamByID", "err", err)
 		return nil, errors.Wrap(err, "get team failed")
 	}
 
-	if !slices.Contains(team.MembersID, userID) {
-		slog.Error("GetTeamByID", "err", "member not found in team")
-		return nil, errors.Wrap(entities.ErrInvalidParam, "user is not member of team")
-	}
 	return team, nil
+}
+
+func (s *Service) GetTeamMembers(ctx context.Context, teamID int64) ([]*entities.TeamMember, error) {
+	slog.Info("GetTeamMembers")
+	members, err := s.Storage.GetTeamMembers(ctx, teamID)
+	if err != nil {
+		slog.Error("GetTeamMembers", "err", err)
+		return nil, errors.Wrap(err, "get team members failed")
+	}
+	return members, nil
 }
 
 func (s *Service) CreateTask(ctx context.Context, userID, assigneeID, teamID int64, title, description string) (*entities.Task, error) {
@@ -250,34 +299,35 @@ func (s *Service) CreateTask(ctx context.Context, userID, assigneeID, teamID int
 		return nil, errors.Wrap(entities.ErrInvalidParam, "teamID is invalid")
 	}
 
-	team, err := s.Storage.GetTeam(ctx, teamID)
-	if err != nil {
-		slog.Error("GetTeam", "err", err)
-		return nil, errors.Wrap(err, "get team failed")
-	}
+	var task *entities.Task
+	var err error
+	status := entities.TaskStatusTODO
 
-	task, err := s.Storage.CreateTask(ctx, userID, assigneeID, teamID, title, description)
+	err = s.Storage.InTx(ctx, func(ctx context.Context, repo Repository) error {
+		task, err = repo.CreateTask(ctx, userID, assigneeID, teamID, title, description, status)
+		if err != nil {
+			slog.Error("CreateTask", "err", err)
+			return errors.Wrap(err, "create task failed")
+		}
+
+		newHistory, err := entities.NewTaskHistory(task.GetID(), userID, "created", nil, &title, time.Now())
+		if err != nil {
+			slog.Error("CreateTask", "err", err)
+			return errors.Wrap(err, "create task history failed")
+		}
+
+		err = repo.AddHistoryRecord(ctx, newHistory)
+		if err != nil {
+			slog.Error("CreateTask", "err", err)
+			return errors.Wrap(err, "add history record failed")
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		slog.Error("CreateTask", "err", err)
 		return nil, errors.Wrap(err, "create task failed")
-	}
-
-	newRecord, err := entities.NewRecord(userID, task.ID, entities.StatusCreated, "task created", "", task.CreateAt)
-	if err != nil {
-		slog.Error("NewRecord", "err", err)
-		return nil, errors.Wrap(err, "create history task failed")
-	}
-
-	err = s.Storage.AddHistory(ctx, newRecord)
-	if err != nil {
-		slog.Error("AddHistory", "err", err)
-		return nil, errors.Wrap(err, "add history task failed")
-	}
-
-	err = team.AddTaskID(task.ID)
-	if err != nil {
-		slog.Error("AddTaskID", "err", err)
-		return nil, errors.Wrap(err, "add task failed")
 	}
 
 	return task, nil
@@ -290,7 +340,7 @@ func (s *Service) GetTaskByID(ctx context.Context, taskID int64) (*entities.Task
 		return nil, errors.Wrap(entities.ErrInvalidParam, "taskID is invalid")
 	}
 
-	task, err := s.Storage.GetTask(ctx, taskID)
+	task, err := s.Storage.GetTaskByID(ctx, taskID)
 	if err != nil {
 		slog.Error("GetTaskByID", "err", err)
 		return nil, errors.Wrap(err, "get task failed")
@@ -299,83 +349,208 @@ func (s *Service) GetTaskByID(ctx context.Context, taskID int64) (*entities.Task
 	return task, nil
 }
 
+func (s *Service) GetTasksByTeam(ctx context.Context, teamID int64, limit, offset int) ([]*entities.Task, error) {
+	slog.Info("GetTasksByTeam")
+	tasks, err := s.Storage.GetTasksByTeam(ctx, teamID, limit, offset)
+	if err != nil {
+		slog.Error("GetTasksByTeam", "err", err)
+		return nil, errors.Wrap(err, "get tasks failed")
+	}
+	return tasks, nil
+}
+
 func (s *Service) UpdateTask(ctx context.Context, userID int64, task *entities.Task) error {
 	slog.Info("UpdateTask")
+
 	if task == nil {
 		slog.Error("UpdateTask", "err", "invalid task")
 		return errors.Wrap(entities.ErrInvalidParam, "task is empty")
 	}
-
-	if userID != task.OwnerID {
-		team, err := s.Storage.GetTeam(ctx, task.TeamID)
-		if err != nil {
-			slog.Error("GetTeam", "err", err)
-			return errors.Wrap(err, "get team failed")
-		}
-
-		if team.OwnerID != userID {
-			return errors.Wrap(entities.ErrInvalidParam, "user can't update task")
-		}
+	if userID <= 0 {
+		return errors.Wrap(entities.ErrInvalidParam, "userID is invalid")
 	}
 
-	err := s.Storage.UpdateTask(ctx, task)
-	if err != nil {
-		slog.Error("UpdateTask", "err", err)
-		return errors.Wrap(err, "update task failed")
-	}
-
-	newRecord, err := entities.NewRecord(userID, task.ID, entities.StatusUpdated, "task updated", fmt.Sprintf("user id: %d\nstatus: %s\ntitle: %s\ndescription: %s", userID, task.Status, task.Title, task.Description), task.CreateAt)
-	if err != nil {
-		slog.Error("NewRecord", "err", err)
-		return errors.Wrap(err, "update history task failed")
-	}
-
-	err = s.Storage.AddHistory(ctx, newRecord)
-	if err != nil {
-		slog.Error("AddHistory", "err", err)
-		return errors.Wrap(err, "add history task failed")
-	}
-
-	return nil
-}
-
-func (s *Service) AddComment(ctx context.Context, userID, taskID int64, comment string) error {
-	slog.Info("AddComment")
-	comm, err := entities.NewComment(userID, comment)
-	if err != nil {
-		slog.Error("AddComment", "err", err)
-		return errors.Wrap(err, "create comment failed")
-	}
-
-	err = s.Storage.AddComment(ctx, taskID, comm)
-	if err != nil {
-		slog.Error("AddComment", "err", err)
-		return errors.Wrap(err, "add comment failed")
-	}
-
-	task, err := s.GetTaskByID(ctx, taskID)
+	oldTask, err := s.Storage.GetTaskByID(ctx, task.GetID())
 	if err != nil {
 		slog.Error("GetTaskByID", "err", err)
-		return errors.Wrap(err, "get task failed")
+		return errors.Wrap(err, "failed to get task")
 	}
 
-	err = task.AddComment(comm)
+	slog.Info("Assignee check",
+		"old_assignee", oldTask.AssigneeID,
+		"new_assignee", task.AssigneeID,
+	)
+
+	if task.AssigneeID == 0 {
+		task.AssigneeID = oldTask.AssigneeID
+	}
+
+	if task.Title == "" {
+		task.Title = oldTask.Title
+	}
+
+	if task.Description == "" {
+		task.Description = oldTask.Description
+	}
+
+	if task.Status == "" {
+		task.Status = oldTask.Status
+	}
+	task.TeamID = oldTask.TeamID
+	task.ID = oldTask.ID
+	task.OwnerID = oldTask.OwnerID
+	task.CreateAt = oldTask.CreateAt
+
+	var historyRecords []*entities.TaskHistory
+
+	if oldTask.Title != task.Title {
+		record, err := entities.NewTaskHistory(
+			task.GetID(),
+			userID,
+			"title",
+			&oldTask.Title,
+			&task.Title,
+			time.Now(),
+		)
+		if err != nil {
+			return errors.Wrap(err, "create history record failed")
+		}
+		historyRecords = append(historyRecords, record)
+	}
+
+	if oldTask.Description != task.Description {
+		record, err := entities.NewTaskHistory(
+			task.GetID(),
+			userID,
+			"description",
+			&oldTask.Description,
+			&task.Description,
+			time.Now(),
+		)
+		if err != nil {
+			return errors.Wrap(err, "create history record failed")
+		}
+		historyRecords = append(historyRecords, record)
+	}
+
+	if oldTask.Status != task.Status {
+		record, err := entities.NewTaskHistory(
+			task.GetID(),
+			userID,
+			"status",
+			&oldTask.Status,
+			&task.Status,
+			time.Now(),
+		)
+		if err != nil {
+			return errors.Wrap(err, "create history record failed")
+		}
+		historyRecords = append(historyRecords, record)
+	}
+
+	if len(historyRecords) == 0 {
+		slog.Info("No changes detected", "task_id", task.GetID())
+		return nil
+	}
+
+	err = s.Storage.InTx(ctx, func(ctx context.Context, repo Repository) error {
+		err := repo.UpdateTask(ctx, task)
+		if err != nil {
+			slog.Error("UpdateTask", "err", err)
+			return errors.Wrap(err, "update task failed")
+		}
+
+		for _, record := range historyRecords {
+			err := repo.AddHistoryRecord(ctx, record)
+			if err != nil {
+				slog.Error("AddHistoryRecord", "err", err)
+				return errors.Wrap(err, "add history record failed")
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		slog.Error("AddComment", "err", err)
-		return errors.Wrap(err, "add comment failed")
+		slog.Error("UpdateTask", "err", err)
+		return err
 	}
 
 	return nil
+
 }
 
-func (s *Service) GetHistory(ctx context.Context, taskID int64) (*entities.History, error) {
+func (s *Service) AddComment(ctx context.Context, userID, taskID int64, content string) (*entities.TaskComment, error) {
+	slog.Info("AddComment")
+
+	if userID <= 0 {
+		slog.Error("AddComment", "err", "invalid userID")
+		return nil, errors.Wrap(entities.ErrInvalidParam, "userID is invalid")
+	}
+	if taskID <= 0 {
+		slog.Error("AddComment", "err", "invalid taskID")
+		return nil, errors.Wrap(entities.ErrInvalidParam, "taskID is invalid")
+	}
+	if content == "" {
+		slog.Error("AddComment", "err", "empty content")
+		return nil, errors.Wrap(entities.ErrInvalidParam, "content is empty")
+	}
+
+	task, err := s.Storage.GetTaskByID(ctx, taskID)
+	if err != nil {
+		slog.Error("GetTaskByID", "err", err)
+		return nil, errors.Wrap(err, "failed to get task")
+	}
+
+	isMember, err := s.Storage.IsMember(ctx, userID, task.TeamID)
+	if err != nil {
+		slog.Error("IsMember", "err", err)
+		return nil, errors.Wrap(err, "failed to check membership")
+	}
+	if !isMember {
+		return nil, errors.Wrap(entities.ErrInvalidParam, "user is not a member of the team")
+	}
+
+	comment, err := entities.NewTaskComment(taskID, userID, content, time.Now())
+	if err != nil {
+		slog.Error("NewTaskComment", "err", err)
+		return nil, errors.Wrap(err, "create comment failed")
+	}
+
+	err = s.Storage.AddComment(ctx, comment)
+	if err != nil {
+		slog.Error("AddComment", "err", err)
+		return nil, errors.Wrap(err, "add comment failed")
+	}
+
+	return comment, nil
+
+}
+
+func (s *Service) GetCommentsByTask(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskComment, error) {
+	slog.Info("GetCommentsByTask")
+	if taskID <= 0 {
+		slog.Error("GetCommentsByTask", "err", "invalid taskID")
+		return nil, errors.Wrap(entities.ErrInvalidParam, "taskID is invalid")
+	}
+
+	comms, err := s.Storage.GetCommentsByTask(ctx, taskID, limit, offset)
+	if err != nil {
+		slog.Error("GetCommentsByTask", "err", err)
+		return nil, errors.Wrap(err, "get comments failed")
+	}
+
+	return comms, nil
+}
+
+func (s *Service) GetTaskHistory(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskHistory, error) {
 	slog.Info("GetHistory")
 	if taskID <= 0 {
 		slog.Error("GetHistory", "err", "invalid taskID")
 		return nil, errors.Wrap(entities.ErrInvalidParam, "taskID is invalid")
 	}
 
-	history, err := s.Storage.GetHistory(ctx, taskID)
+	history, err := s.Storage.GetTaskHistory(ctx, taskID, limit, offset)
 	if err != nil {
 		slog.Error("GetHistory", "err", err)
 		return nil, errors.Wrap(err, "get history failed")
