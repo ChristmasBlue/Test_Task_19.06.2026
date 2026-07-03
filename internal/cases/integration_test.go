@@ -59,7 +59,7 @@ func TestServiceIntegration_CreateTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, task.ID, found.ID)
 
-	cached, err := svc.GetTaskByID(ctx, task.ID)
+	cached, err := svc.GetTaskByID(ctx, user.ID, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, task.ID, cached.ID)
 }

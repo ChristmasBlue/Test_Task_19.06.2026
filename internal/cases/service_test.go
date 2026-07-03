@@ -38,7 +38,7 @@ func (m *mockConfig) MaxOpenConns() int                       { return 25 }
 func (m *mockConfig) MaxIdleConns() int                       { return 10 }
 func (m *mockConfig) LifeConns() time.Duration                { return 5 * time.Minute }
 func (m *mockConfig) CacheHost() string                       { return "localhost" }
-func (m *mockConfig) CachePort() string                       { return "6379" }
+func (m *mockConfig) CachePort() int                          { return 6379 }
 func (m *mockConfig) CacheTTL() time.Duration                 { return 5 * time.Minute }
 func (m *mockConfig) CachePass() string                       { return "" }
 func (m *mockConfig) CacheDB() int                            { return 0 }
@@ -46,16 +46,13 @@ func (m *mockConfig) RateLimiterRate() float64                { return 100 }
 func (m *mockConfig) RateLimiterBurst() int                   { return 100 }
 
 func TestService_CreateUser_Success(t *testing.T) {
-	// 1. Создаём контроллер
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// 2. Создаём моки
 	mockRepo := mocks.NewMockRepository(ctrl)
 	mockCache := mocks.NewMockCache(ctrl)
 	cfg := &mockConfig{}
 
-	// 3. Создаём сервис
 	svc, err := cases.NewService(mockRepo, mockCache, cfg)
 	require.NoError(t, err)
 
@@ -390,14 +387,24 @@ func TestService_GetTaskByID_FromCache(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
-	expectedTask := &entities.Task{ID: taskID, Title: "Test Task"}
+	teamID := int64(1)
+	expectedTask := &entities.Task{
+		ID:     taskID,
+		TeamID: teamID,
+		Title:  "Test Task",
+	}
 
 	mockCache.EXPECT().
 		GetTask(ctx, taskID).
 		Return(expectedTask, nil)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.NoError(t, err)
 	require.NotNil(t, task)
@@ -416,8 +423,14 @@ func TestService_GetTaskByID_CacheMiss(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
-	expectedTask := &entities.Task{ID: taskID, Title: "Test Task"}
+	teamID := int64(1)
+	expectedTask := &entities.Task{
+		ID:     taskID,
+		TeamID: teamID,
+		Title:  "Test Task",
+	}
 
 	mockCache.EXPECT().
 		GetTask(ctx, taskID).
@@ -427,11 +440,15 @@ func TestService_GetTaskByID_CacheMiss(t *testing.T) {
 		GetTaskByID(ctx, taskID).
 		Return(expectedTask, nil)
 
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
 	mockCache.EXPECT().
 		SetTask(ctx, expectedTask).
 		Return(nil)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.NoError(t, err)
 	require.NotNil(t, task)
@@ -1002,6 +1019,7 @@ func TestService_GetTeamByID_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	expectedTeam := &entities.Team{
 		ID:      1,
@@ -1013,7 +1031,11 @@ func TestService_GetTeamByID_Success(t *testing.T) {
 		GetTeamByID(ctx, teamID).
 		Return(expectedTeam, nil)
 
-	team, err := svc.GetTeamByID(ctx, teamID)
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	team, err := svc.GetTeamByID(ctx, userID, teamID)
 
 	require.NoError(t, err)
 	require.NotNil(t, team)
@@ -1034,13 +1056,18 @@ func TestService_GetTeamByID_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(999)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTeamByID(ctx, teamID).
 		Return(nil, entities.ErrNotFound)
 
-	team, err := svc.GetTeamByID(ctx, teamID)
+	team, err := svc.GetTeamByID(ctx, userID, teamID)
 
 	require.Error(t, err)
 	require.Nil(t, team)
@@ -1059,13 +1086,18 @@ func TestService_GetTeamByID_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTeamByID(ctx, teamID).
 		Return(nil, errTest)
 
-	team, err := svc.GetTeamByID(ctx, teamID)
+	team, err := svc.GetTeamByID(ctx, userID, teamID)
 
 	require.Error(t, err)
 	require.Nil(t, team)
@@ -1084,6 +1116,7 @@ func TestService_GetTeamMembers_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	expectedMembers := []*entities.TeamMember{
 		{UserID: 1, TeamID: 1, Role: "owner"},
@@ -1092,10 +1125,14 @@ func TestService_GetTeamMembers_Success(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetTeamMembers(ctx, teamID).
 		Return(expectedMembers, nil)
 
-	members, err := svc.GetTeamMembers(ctx, teamID)
+	members, err := svc.GetTeamMembers(ctx, userID, teamID)
 
 	require.NoError(t, err)
 	require.NotNil(t, members)
@@ -1118,13 +1155,18 @@ func TestService_GetTeamMembers_EmptyList(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTeamMembers(ctx, teamID).
 		Return([]*entities.TeamMember{}, nil)
 
-	members, err := svc.GetTeamMembers(ctx, teamID)
+	members, err := svc.GetTeamMembers(ctx, userID, teamID)
 
 	require.NoError(t, err)
 	require.Empty(t, members)
@@ -1142,13 +1184,18 @@ func TestService_GetTeamMembers_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(999)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTeamMembers(ctx, teamID).
 		Return(nil, entities.ErrNotFound)
 
-	members, err := svc.GetTeamMembers(ctx, teamID)
+	members, err := svc.GetTeamMembers(ctx, userID, teamID)
 
 	require.Error(t, err)
 	require.Nil(t, members)
@@ -1167,13 +1214,18 @@ func TestService_GetTeamMembers_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTeamMembers(ctx, teamID).
 		Return(nil, errTest)
 
-	members, err := svc.GetTeamMembers(ctx, teamID)
+	members, err := svc.GetTeamMembers(ctx, userID, teamID)
 
 	require.Error(t, err)
 	require.Nil(t, members)
@@ -1185,7 +1237,7 @@ func TestService_CreateTask_Success(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := mocks.NewMockRepository(ctrl)
-	mockCache := mocks.NewMockCache(ctrl) // ← Cache для SetTask и DeleteTasksByTeam
+	mockCache := mocks.NewMockCache(ctrl)
 	cfg := &mockConfig{}
 
 	svc, err := cases.NewService(mockRepo, mockCache, cfg)
@@ -1197,7 +1249,11 @@ func TestService_CreateTask_Success(t *testing.T) {
 	teamID := int64(1)
 	title := "Test Task"
 	description := "Test Description"
-	expectedTask := &entities.Task{ID: 1, Title: title, Description: description}
+	expectedTask := &entities.Task{ID: 1, TeamID: teamID, Title: title, Description: description}
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		InTx(gomock.Any(), gomock.Any()).
@@ -1349,6 +1405,10 @@ func TestService_CreateTask_CreateTaskError(t *testing.T) {
 	description := "Test Description"
 
 	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		InTx(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, fn func(context.Context, cases.Repository) error) error {
 			return fn(ctx, mockRepo)
@@ -1382,7 +1442,11 @@ func TestService_CreateTask_AddHistoryError(t *testing.T) {
 	teamID := int64(1)
 	title := "Test Task"
 	description := "Test Description"
-	expectedTask := &entities.Task{ID: 1, Title: title, Description: description}
+	expectedTask := &entities.Task{ID: 1, TeamID: teamID, Title: title, Description: description}
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		InTx(gomock.Any(), gomock.Any()).
@@ -1417,17 +1481,24 @@ func TestService_GetTaskByID_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	expectedTask := &entities.Task{
-		ID:    taskID,
-		Title: "Test Task",
+		ID:     taskID,
+		TeamID: teamID,
+		Title:  "Test Task",
 	}
 
 	mockCache.EXPECT().
 		GetTask(ctx, taskID).
 		Return(expectedTask, nil)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.NoError(t, err)
 	require.NotNil(t, task)
@@ -1447,10 +1518,13 @@ func TestService_GetTaskByID_CacheMiss_DBSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	expectedTask := &entities.Task{
-		ID:    taskID,
-		Title: "Test Task",
+		ID:     taskID,
+		TeamID: teamID,
+		Title:  "Test Task",
 	}
 
 	mockCache.EXPECT().
@@ -1461,11 +1535,15 @@ func TestService_GetTaskByID_CacheMiss_DBSuccess(t *testing.T) {
 		GetTaskByID(ctx, taskID).
 		Return(expectedTask, nil)
 
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
 	mockCache.EXPECT().
 		SetTask(ctx, expectedTask).
 		Return(nil)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.NoError(t, err)
 	require.NotNil(t, task)
@@ -1486,6 +1564,7 @@ func TestService_GetTaskByID_CacheMiss_DBError(t *testing.T) {
 
 	ctx := context.Background()
 	taskID := int64(1)
+	userID := int64(1)
 
 	mockCache.EXPECT().
 		GetTask(ctx, taskID).
@@ -1495,7 +1574,7 @@ func TestService_GetTaskByID_CacheMiss_DBError(t *testing.T) {
 		GetTaskByID(ctx, taskID).
 		Return(nil, errTest)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.Error(t, err)
 	require.Nil(t, task)
@@ -1514,27 +1593,33 @@ func TestService_GetTaskByID_CacheGetError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 
-	// Кеш вернул ошибку (не критично, идём в БД)
 	mockCache.EXPECT().
 		GetTask(ctx, taskID).
 		Return(nil, errTest)
 
 	expectedTask := &entities.Task{
-		ID:    taskID,
-		Title: "Test Task",
+		ID:     taskID,
+		TeamID: teamID,
+		Title:  "Test Task",
 	}
 
 	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
 		Return(expectedTask, nil)
 
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
 	mockCache.EXPECT().
 		SetTask(ctx, expectedTask).
 		Return(nil)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.NoError(t, err)
 	require.NotNil(t, task)
@@ -1554,8 +1639,9 @@ func TestService_GetTaskByID_InvalidID(t *testing.T) {
 
 	ctx := context.Background()
 	taskID := int64(0)
+	userID := int64(1)
 
-	task, err := svc.GetTaskByID(ctx, taskID)
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
 
 	require.Error(t, err)
 	require.Nil(t, task)
@@ -1574,6 +1660,7 @@ func TestService_GetTasksByTeam_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	limit := 20
 	offset := 0
@@ -1582,11 +1669,15 @@ func TestService_GetTasksByTeam_Success(t *testing.T) {
 		{ID: 2, Title: "Task 2", TeamID: teamID},
 	}
 
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
 	mockCache.EXPECT().
 		GetTasksByTeam(ctx, teamID).
 		Return(expectedTasks, nil)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.NoError(t, err)
 	require.NotNil(t, tasks)
@@ -1607,6 +1698,7 @@ func TestService_GetTasksByTeam_CacheMiss_DBSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	limit := 20
 	offset := 0
@@ -1614,6 +1706,10 @@ func TestService_GetTasksByTeam_CacheMiss_DBSuccess(t *testing.T) {
 		{ID: 1, Title: "Task 1", TeamID: teamID},
 		{ID: 2, Title: "Task 2", TeamID: teamID},
 	}
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockCache.EXPECT().
 		GetTasksByTeam(ctx, teamID).
@@ -1627,7 +1723,7 @@ func TestService_GetTasksByTeam_CacheMiss_DBSuccess(t *testing.T) {
 		SetTasksByTeam(ctx, teamID, expectedTasks).
 		Return(nil)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.NoError(t, err)
 	require.NotNil(t, tasks)
@@ -1647,9 +1743,14 @@ func TestService_GetTasksByTeam_CacheMiss_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockCache.EXPECT().
 		GetTasksByTeam(ctx, teamID).
@@ -1659,7 +1760,7 @@ func TestService_GetTasksByTeam_CacheMiss_DBError(t *testing.T) {
 		GetTasksByTeam(ctx, teamID, 0, 0).
 		Return(nil, errTest)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, tasks)
@@ -1678,6 +1779,7 @@ func TestService_GetTasksByTeam_CacheGetError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	limit := 20
 	offset := 0
@@ -1686,7 +1788,10 @@ func TestService_GetTasksByTeam_CacheGetError(t *testing.T) {
 		{ID: 2, Title: "Task 2", TeamID: teamID},
 	}
 
-	// Кеш вернул ошибку (не критично, идём в БД)
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
 	mockCache.EXPECT().
 		GetTasksByTeam(ctx, teamID).
 		Return(nil, errTest)
@@ -1699,7 +1804,7 @@ func TestService_GetTasksByTeam_CacheGetError(t *testing.T) {
 		SetTasksByTeam(ctx, teamID, expectedTasks).
 		Return(nil)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.NoError(t, err)
 	require.NotNil(t, tasks)
@@ -1718,9 +1823,14 @@ func TestService_GetTasksByTeam_EmptyTasks(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockCache.EXPECT().
 		GetTasksByTeam(ctx, teamID).
@@ -1730,7 +1840,7 @@ func TestService_GetTasksByTeam_EmptyTasks(t *testing.T) {
 		GetTasksByTeam(ctx, teamID, 0, 0).
 		Return([]*entities.Task{}, nil)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.NoError(t, err)
 	require.Empty(t, tasks)
@@ -1748,24 +1858,20 @@ func TestService_GetTasksByTeam_InvalidTeamID(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	teamID := int64(0)
 	limit := 20
 	offset := 0
 
-	// Метод не проверяет teamID, но передаёт в репозиторий
-	// Тест проверяет, что ошибка будет от репозитория
-	mockCache.EXPECT().
-		GetTasksByTeam(ctx, teamID).
-		Return(nil, nil)
-
 	mockRepo.EXPECT().
-		GetTasksByTeam(ctx, teamID, 0, 0).
-		Return(nil, errTest)
+		IsMember(ctx, userID, teamID).
+		Return(false, nil)
 
-	tasks, err := svc.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := svc.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, tasks)
+	require.ErrorIs(t, err, entities.ErrForbidden)
 }
 
 func TestService_UpdateTask_Success(t *testing.T) {
@@ -1805,6 +1911,10 @@ func TestService_UpdateTask_Success(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
 		Return(oldTask, nil)
 
@@ -1818,11 +1928,10 @@ func TestService_UpdateTask_Success(t *testing.T) {
 		UpdateTask(ctx, updatedTask).
 		Return(nil)
 
-	// ✅ AddHistoryRecord вызывается 3 раза (для title, description, status)
 	mockRepo.EXPECT().
 		AddHistoryRecord(ctx, gomock.Any()).
 		Return(nil).
-		Times(3) // ← важно: 3 раза!
+		Times(3)
 
 	mockCache.EXPECT().
 		SetTask(ctx, updatedTask).
@@ -1830,6 +1939,10 @@ func TestService_UpdateTask_Success(t *testing.T) {
 
 	mockCache.EXPECT().
 		DeleteTasksByTeam(ctx, teamID).
+		Return(nil)
+
+	mockCache.EXPECT().
+		DeleteTasksByFilter(ctx, taskID, teamID).
 		Return(nil)
 
 	err = svc.UpdateTask(ctx, userID, updatedTask)
@@ -1874,14 +1987,12 @@ func TestService_UpdateTask_NoChanges(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
 		Return(oldTask, nil)
-
-	// ❌ Нет изменений → InTx НЕ вызывается
-	// ❌ UpdateTask НЕ вызывается
-	// ❌ AddHistoryRecord НЕ вызывается
-	// ❌ SetTask НЕ вызывается
-	// ❌ DeleteTasksByTeam НЕ вызывается
 
 	err = svc.UpdateTask(ctx, userID, updatedTask)
 
@@ -1943,7 +2054,12 @@ func TestService_UpdateTask_TaskNotFound(t *testing.T) {
 	ctx := context.Background()
 	userID := int64(1)
 	taskID := int64(999)
-	task := &entities.Task{ID: taskID, Title: "Task"}
+	teamID := int64(1)
+	task := &entities.Task{ID: taskID, TeamID: teamID, Title: "Task"}
+
+	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
@@ -1994,6 +2110,10 @@ func TestService_UpdateTask_ChangeAssignee(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
 		Return(oldTask, nil)
 
@@ -2010,7 +2130,7 @@ func TestService_UpdateTask_ChangeAssignee(t *testing.T) {
 	mockRepo.EXPECT().
 		AddHistoryRecord(ctx, gomock.Any()).
 		Return(nil).
-		AnyTimes()
+		Times(1)
 
 	mockCache.EXPECT().
 		SetTask(ctx, gomock.Any()).
@@ -2018,6 +2138,10 @@ func TestService_UpdateTask_ChangeAssignee(t *testing.T) {
 
 	mockCache.EXPECT().
 		DeleteTasksByTeam(ctx, teamID).
+		Return(nil)
+
+	mockCache.EXPECT().
+		DeleteTasksByFilter(ctx, taskID, teamID).
 		Return(nil)
 
 	err = svc.UpdateTask(ctx, userID, updatedTask)
@@ -2060,6 +2184,10 @@ func TestService_UpdateTask_UpdateDBError(t *testing.T) {
 		OwnerID:     userID,
 		CreateAt:    oldTask.CreateAt,
 	}
+
+	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
@@ -2118,6 +2246,10 @@ func TestService_UpdateTask_AddHistoryError(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetTaskByID(ctx, taskID).
 		Return(oldTask, nil)
 
@@ -2133,7 +2265,8 @@ func TestService_UpdateTask_AddHistoryError(t *testing.T) {
 
 	mockRepo.EXPECT().
 		AddHistoryRecord(ctx, gomock.Any()).
-		Return(errTest)
+		Return(errTest).
+		Times(1)
 
 	err = svc.UpdateTask(ctx, userID, updatedTask)
 
@@ -2361,7 +2494,9 @@ func TestService_GetCommentsByTask_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
 	expectedComments := []*entities.TaskComment{
@@ -2370,10 +2505,18 @@ func TestService_GetCommentsByTask_Success(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetCommentsByTask(ctx, taskID, limit, offset).
 		Return(expectedComments, nil)
 
-	comments, err := svc.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.NotNil(t, comments)
@@ -2394,15 +2537,25 @@ func TestService_GetCommentsByTask_EmptyList(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetCommentsByTask(ctx, taskID, limit, offset).
 		Return([]*entities.TaskComment{}, nil)
 
-	comments, err := svc.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.Empty(t, comments)
@@ -2420,11 +2573,12 @@ func TestService_GetCommentsByTask_InvalidTaskID(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(0)
 	limit := 20
 	offset := 0
 
-	comments, err := svc.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, comments)
@@ -2443,15 +2597,25 @@ func TestService_GetCommentsByTask_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetCommentsByTask(ctx, taskID, limit, offset).
 		Return(nil, errTest)
 
-	comments, err := svc.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, comments)
@@ -2470,7 +2634,9 @@ func TestService_GetCommentsByTask_WithPagination(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 10
 	offset := 20
 	expectedComments := []*entities.TaskComment{
@@ -2479,10 +2645,18 @@ func TestService_GetCommentsByTask_WithPagination(t *testing.T) {
 	}
 
 	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
 		GetCommentsByTask(ctx, taskID, limit, offset).
 		Return(expectedComments, nil)
 
-	comments, err := svc.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.Len(t, comments, 2)
@@ -2500,19 +2674,29 @@ func TestService_GetTaskHistory_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
 	expectedHistory := []*entities.TaskHistory{
-		{TaskID: 1, ChangedBy: 1, Field: "status", OldValue: strPtr("todo"), NewValue: strPtr("done")},
-		{TaskID: 1, ChangedBy: 2, Field: "title", OldValue: strPtr("Old"), NewValue: strPtr("New")},
+		{TaskID: taskID, ChangeBy: 1, Field: "status", OldValue: strPtr("todo"), NewValue: strPtr("done")},
+		{TaskID: taskID, ChangeBy: 2, Field: "title", OldValue: strPtr("Old"), NewValue: strPtr("New")},
 	}
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskHistory(ctx, taskID, limit, offset).
 		Return(expectedHistory, nil)
 
-	history, err := svc.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.NotNil(t, history)
@@ -2533,15 +2717,25 @@ func TestService_GetTaskHistory_EmptyList(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskHistory(ctx, taskID, limit, offset).
 		Return([]*entities.TaskHistory{}, nil)
 
-	history, err := svc.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.Empty(t, history)
@@ -2559,11 +2753,12 @@ func TestService_GetTaskHistory_InvalidTaskID(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(0)
 	limit := 20
 	offset := 0
 
-	history, err := svc.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, history)
@@ -2582,15 +2777,25 @@ func TestService_GetTaskHistory_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 20
 	offset := 0
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskHistory(ctx, taskID, limit, offset).
 		Return(nil, errTest)
 
-	history, err := svc.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, limit, offset)
 
 	require.Error(t, err)
 	require.Nil(t, history)
@@ -2609,19 +2814,29 @@ func TestService_GetTaskHistory_WithPagination(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	userID := int64(1)
 	taskID := int64(1)
+	teamID := int64(1)
 	limit := 10
 	offset := 20
 	expectedHistory := []*entities.TaskHistory{
-		{TaskID: 1, ChangedBy: 1, Field: "status"},
-		{TaskID: 1, ChangedBy: 2, Field: "description"},
+		{TaskID: taskID, ChangeBy: 1, Field: "status"},
+		{TaskID: taskID, ChangeBy: 2, Field: "description"},
 	}
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(true, nil)
 
 	mockRepo.EXPECT().
 		GetTaskHistory(ctx, taskID, limit, offset).
 		Return(expectedHistory, nil)
 
-	history, err := svc.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, limit, offset)
 
 	require.NoError(t, err)
 	require.Len(t, history, 2)
@@ -2656,14 +2871,12 @@ func TestService_GetTasksByFilter_SingleTeam_FromCache(t *testing.T) {
 		{ID: 2, Title: "Task 2", TeamID: teamID},
 	}
 
-	// Проверяем, что пользователь состоит в команде
 	mockRepo.EXPECT().
 		IsMember(ctx, userID, teamID).
 		Return(true, nil)
 
-	// Получаем из кеша
 	mockCache.EXPECT().
-		GetTasksByTeam(ctx, teamID).
+		GetTasksByFilter(ctx, filter).
 		Return(expectedTasks, nil)
 
 	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
@@ -2703,15 +2916,15 @@ func TestService_GetTasksByFilter_SingleTeam_CacheMiss_DBSuccess(t *testing.T) {
 		Return(true, nil)
 
 	mockCache.EXPECT().
-		GetTasksByTeam(ctx, teamID).
+		GetTasksByFilter(ctx, filter).
 		Return(nil, nil)
 
 	mockRepo.EXPECT().
-		GetTasksByTeam(ctx, teamID, 0, 0).
+		GetTasksByFilter(ctx, filter).
 		Return(expectedTasks, nil)
 
 	mockCache.EXPECT().
-		SetTasksByTeam(ctx, teamID, expectedTasks).
+		SetTasksByFilter(ctx, filter, expectedTasks).
 		Return(nil)
 
 	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
@@ -2746,15 +2959,21 @@ func TestService_GetTasksByFilter_MultipleTeams_DB(t *testing.T) {
 		{ID: 2, Title: "Task 2", TeamID: 2},
 	}
 
-	// Проверяем только первую команду (по ТЗ)
 	mockRepo.EXPECT().
 		IsMember(ctx, userID, teamIDs[0]).
 		Return(true, nil)
 
-	// Несколько команд → сразу в БД
+	mockCache.EXPECT().
+		GetTasksByFilter(ctx, filter).
+		Return(nil, nil)
+
 	mockRepo.EXPECT().
 		GetTasksByFilter(ctx, filter).
 		Return(expectedTasks, nil)
+
+	mockCache.EXPECT().
+		SetTasksByFilter(ctx, filter, expectedTasks).
+		Return(nil)
 
 	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
 
@@ -2776,13 +2995,21 @@ func TestService_GetTasksByFilter_NoTeamIDs_GetUserTeams(t *testing.T) {
 
 	ctx := context.Background()
 	userID := int64(1)
-	filter := dto.TaskFilter{
+	originalFilter := dto.TaskFilter{
 		TeamIDs: []int64{},
 		Status:  nil,
 		Limit:   20,
 		Offset:  0,
 	}
 	teamIDs := []int64{1, 2}
+
+	updatedFilter := dto.TaskFilter{
+		TeamIDs: teamIDs,
+		Status:  nil,
+		Limit:   20,
+		Offset:  0,
+	}
+
 	expectedTasks := []*entities.Task{
 		{ID: 1, Title: "Task 1", TeamID: 1},
 		{ID: 2, Title: "Task 2", TeamID: 2},
@@ -2792,11 +3019,19 @@ func TestService_GetTasksByFilter_NoTeamIDs_GetUserTeams(t *testing.T) {
 		GetUserTeams(ctx, userID).
 		Return(teamIDs, nil)
 
+	mockCache.EXPECT().
+		GetTasksByFilter(ctx, updatedFilter).
+		Return(nil, nil)
+
 	mockRepo.EXPECT().
-		GetTasksByFilter(ctx, gomock.Any()).
+		GetTasksByFilter(ctx, updatedFilter).
 		Return(expectedTasks, nil)
 
-	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
+	mockCache.EXPECT().
+		SetTasksByFilter(ctx, updatedFilter, expectedTasks).
+		Return(nil)
+
+	tasks, err := svc.GetTasksByFilter(ctx, userID, originalFilter)
 
 	require.NoError(t, err)
 	require.NotNil(t, tasks)
@@ -2896,7 +3131,7 @@ func TestService_GetTasksByFilter_WithStatusFilter(t *testing.T) {
 		Return(true, nil)
 
 	mockCache.EXPECT().
-		GetTasksByTeam(ctx, teamID).
+		GetTasksByFilter(ctx, filter).
 		Return(expectedTasks, nil)
 
 	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
@@ -2937,7 +3172,7 @@ func TestService_GetTasksByFilter_WithAssigneeFilter(t *testing.T) {
 		Return(true, nil)
 
 	mockCache.EXPECT().
-		GetTasksByTeam(ctx, teamID).
+		GetTasksByFilter(ctx, filter).
 		Return(expectedTasks, nil)
 
 	tasks, err := svc.GetTasksByFilter(ctx, userID, filter)
@@ -3211,5 +3446,522 @@ func TestService_GetInvalidAssigneeTasks_DBError(t *testing.T) {
 
 	require.Error(t, err)
 	require.Nil(t, tasks)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetTaskHistory_GetTaskByIDError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(nil, errTest)
+
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, history)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetTaskHistory_IsMemberError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, errTest)
+
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, history)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetTaskHistory_UserNotMember(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, nil)
+
+	history, err := svc.GetTaskHistory(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, history)
+	require.ErrorIs(t, err, entities.ErrForbidden)
+}
+
+func TestService_GetCommentsByTask_GetTaskByIDError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(nil, errTest)
+
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, comments)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetCommentsByTask_IsMemberError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, errTest)
+
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, comments)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetCommentsByTask_UserNotMember(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, nil)
+
+	comments, err := svc.GetCommentsByTask(ctx, userID, taskID, 20, 0)
+
+	require.Error(t, err)
+	require.Nil(t, comments)
+	require.ErrorIs(t, err, entities.ErrForbidden)
+}
+
+func TestService_UpdateTask_IsAdminOrOwnerError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+	task := &entities.Task{ID: taskID, TeamID: teamID}
+
+	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(false, errTest)
+
+	err = svc.UpdateTask(ctx, userID, task)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_UpdateTask_CacheSetError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+	oldTask := &entities.Task{
+		ID:          taskID,
+		Title:       "Old Title",
+		Description: "Old Description",
+		Status:      entities.TaskStatusTODO,
+		AssigneeID:  2,
+		TeamID:      teamID,
+		OwnerID:     userID,
+		CreateAt:    time.Now(),
+	}
+	updatedTask := &entities.Task{
+		ID:          taskID,
+		Title:       "New Title",
+		Description: "New Description",
+		Status:      entities.TaskStatusInProgress,
+		AssigneeID:  2,
+		TeamID:      teamID,
+		OwnerID:     userID,
+		CreateAt:    oldTask.CreateAt,
+	}
+
+	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(true, nil)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(oldTask, nil)
+
+	mockRepo.EXPECT().
+		InTx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, fn func(context.Context, cases.Repository) error) error {
+			return fn(ctx, mockRepo)
+		})
+
+	mockRepo.EXPECT().
+		UpdateTask(ctx, updatedTask).
+		Return(nil)
+
+	mockRepo.EXPECT().
+		AddHistoryRecord(ctx, gomock.Any()).
+		Return(nil).
+		Times(3)
+
+	mockCache.EXPECT().
+		SetTask(ctx, updatedTask).
+		Return(errTest)
+
+	mockCache.EXPECT().
+		DeleteTasksByTeam(ctx, teamID).
+		Return(nil)
+
+	mockCache.EXPECT().
+		DeleteTasksByFilter(ctx, taskID, teamID).
+		Return(nil)
+
+	err = svc.UpdateTask(ctx, userID, updatedTask)
+
+	require.NoError(t, err)
+}
+
+func TestService_GetTaskByID_IsMemberError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockCache.EXPECT().
+		GetTask(ctx, taskID).
+		Return(nil, nil)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, errTest)
+
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
+
+	require.Error(t, err)
+	require.Nil(t, task)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_GetTaskByID_UserNotMember(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	taskID := int64(1)
+	teamID := int64(1)
+
+	mockCache.EXPECT().
+		GetTask(ctx, taskID).
+		Return(nil, nil)
+
+	mockRepo.EXPECT().
+		GetTaskByID(ctx, taskID).
+		Return(&entities.Task{ID: taskID, TeamID: teamID}, nil)
+
+	mockRepo.EXPECT().
+		IsMember(ctx, userID, teamID).
+		Return(false, nil)
+
+	task, err := svc.GetTaskByID(ctx, userID, taskID)
+
+	require.Error(t, err)
+	require.Nil(t, task)
+	require.ErrorIs(t, err, entities.ErrForbidden)
+}
+
+func TestService_CreateUser_EmptyEmail(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	name := "John Doe"
+	email := ""
+	password := "password123"
+
+	user, err := svc.CreateUser(ctx, name, email, password)
+
+	require.Error(t, err)
+	require.Nil(t, user)
+	require.Contains(t, err.Error(), "email is empty")
+}
+
+func TestService_CreateUser_EmptyPassword(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	name := "John Doe"
+	email := "john@example.com"
+	password := ""
+
+	user, err := svc.CreateUser(ctx, name, email, password)
+
+	require.Error(t, err)
+	require.Nil(t, user)
+	require.Contains(t, err.Error(), "password is empty")
+}
+
+func TestService_AddMember_InvalidTeamID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	teamID := int64(0)
+	memberID := int64(2)
+	role := "member"
+
+	err = svc.AddMember(ctx, userID, teamID, memberID, role)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "teamID is invalid")
+}
+
+func TestService_AddMember_IsAdminOrOwnerError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	teamID := int64(1)
+	memberID := int64(2)
+	role := "member"
+
+	mockRepo.EXPECT().
+		GetTeamByID(ctx, teamID).
+		Return(&entities.Team{ID: teamID, Name: "Team A"}, nil)
+
+	mockRepo.EXPECT().
+		IsAdminOrOwner(ctx, userID, teamID).
+		Return(false, errTest)
+
+	err = svc.AddMember(ctx, userID, teamID, memberID, role)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_CreateTeam_CreateTeamError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	teamName := "Team A"
+
+	mockRepo.EXPECT().
+		InTx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, fn func(context.Context, cases.Repository) error) error {
+			return fn(ctx, mockRepo)
+		})
+
+	mockRepo.EXPECT().
+		CreateTeam(ctx, teamName, userID).
+		Return(nil, errTest)
+
+	team, err := svc.CreateTeam(ctx, userID, teamName)
+
+	require.Error(t, err)
+	require.Nil(t, team)
+	require.ErrorIs(t, err, errTest)
+}
+
+func TestService_CreateTeam_AddMemberError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockRepository(ctrl)
+	mockCache := mocks.NewMockCache(ctrl)
+	cfg := &mockConfig{}
+
+	svc, err := cases.NewService(mockRepo, mockCache, cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	userID := int64(1)
+	teamName := "Team A"
+
+	mockRepo.EXPECT().
+		InTx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, fn func(context.Context, cases.Repository) error) error {
+			return fn(ctx, mockRepo)
+		})
+
+	mockRepo.EXPECT().
+		CreateTeam(ctx, teamName, userID).
+		Return(&entities.Team{ID: 1, Name: teamName, OwnerID: userID}, nil)
+
+	mockRepo.EXPECT().
+		AddMember(ctx, userID, int64(1), "owner").
+		Return(errTest)
+
+	team, err := svc.CreateTeam(ctx, userID, teamName)
+
+	require.Error(t, err)
+	require.Nil(t, team)
 	require.ErrorIs(t, err, errTest)
 }

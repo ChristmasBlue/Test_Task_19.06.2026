@@ -1154,31 +1154,16 @@ func (s *Storage) GetTopCreators(ctx context.Context) ([]dto.TopCreator, error) 
 	e := s.execution()
 
 	query := `
-        SELECT 
-            team_id,
-            team_name,
-            user_id,
-            user_name,
-            task_count,
-            rank
-        FROM (
-            SELECT 
-                t.team_id,
-                t.name AS team_name,
-                u.id AS user_id,
-                u.name AS user_name,
-                COUNT(tk.id) AS task_count,
-                RANK() OVER (PARTITION BY t.team_id ORDER BY COUNT(tk.id) DESC) AS rank
-            FROM teams t
-            JOIN tasks tk ON t.id = tk.team_id
-            JOIN users u ON tk.owner_id = u.id
-            JOIN team_members tm ON t.id = tm.team_id AND tm.user_id = u.id
-            WHERE tk.create_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            GROUP BY t.team_id, tm.name, u.id, u.name
-        ) ranked
-        WHERE rank <= 3
-        ORDER BY team_id, rank
-    `
+        SELECT team_id, team_name, user_id, user_name, task_count, rank
+		FROM (SELECT t.id AS team_id, t.name AS team_name, u.id AS user_id, u.name AS user_name, COUNT(tk.id) AS task_count, RANK() OVER (PARTITION BY t.id ORDER BY COUNT(tk.id) DESC) AS rank
+    			FROM teams t
+    			JOIN tasks tk ON t.id = tk.team_id
+    			JOIN users u ON tk.owner_id = u.id
+    			WHERE tk.create_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+    			GROUP BY t.id, t.name, u.id, u.name
+			) ranked
+		WHERE rank <= 3
+		ORDER BY team_id, rank`
 
 	rows, err := e.QueryContext(ctx, query)
 	if err != nil {

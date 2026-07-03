@@ -20,7 +20,7 @@ type RateLimiter struct {
 func NewRateLimiter(cfg config.Config) *RateLimiter {
 	rl := &RateLimiter{
 		visitors: make(map[string]*rate.Limiter),
-		rate:     rate.Limit(cfg.RateLimiterRate()),
+		rate:     rate.Limit(cfg.RateLimiterRate() / 60),
 		burst:    cfg.RateLimiterBurst(),
 	}
 
@@ -51,7 +51,7 @@ func (rl *RateLimiter) cleanup() {
 		time.Sleep(1 * time.Minute)
 		rl.mu.Lock()
 		for ip, limiter := range rl.visitors {
-			if limiter.Allow() {
+			if limiter.Tokens() >= float64(rl.burst) {
 				delete(rl.visitors, ip)
 			}
 		}

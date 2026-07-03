@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 	entities "test_task/internal/entities"
+	dto "test_task/pkg/dto"
 
 	gomock "go.uber.org/mock/gomock"
 )
@@ -55,6 +56,20 @@ func (mr *MockCacheMockRecorder) DeleteTask(ctx, taskID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteTask", reflect.TypeOf((*MockCache)(nil).DeleteTask), ctx, taskID)
 }
 
+// DeleteTasksByFilter mocks base method.
+func (m *MockCache) DeleteTasksByFilter(ctx context.Context, taskID, teamID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteTasksByFilter", ctx, taskID, teamID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteTasksByFilter indicates an expected call of DeleteTasksByFilter.
+func (mr *MockCacheMockRecorder) DeleteTasksByFilter(ctx, taskID, teamID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteTasksByFilter", reflect.TypeOf((*MockCache)(nil).DeleteTasksByFilter), ctx, taskID, teamID)
+}
+
 // DeleteTasksByTeam mocks base method.
 func (m *MockCache) DeleteTasksByTeam(ctx context.Context, teamID int64) error {
 	m.ctrl.T.Helper()
@@ -84,6 +99,21 @@ func (mr *MockCacheMockRecorder) GetTask(ctx, taskID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTask", reflect.TypeOf((*MockCache)(nil).GetTask), ctx, taskID)
 }
 
+// GetTasksByFilter mocks base method.
+func (m *MockCache) GetTasksByFilter(ctx context.Context, filter dto.TaskFilter) ([]*entities.Task, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTasksByFilter", ctx, filter)
+	ret0, _ := ret[0].([]*entities.Task)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTasksByFilter indicates an expected call of GetTasksByFilter.
+func (mr *MockCacheMockRecorder) GetTasksByFilter(ctx, filter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTasksByFilter", reflect.TypeOf((*MockCache)(nil).GetTasksByFilter), ctx, filter)
+}
+
 // GetTasksByTeam mocks base method.
 func (m *MockCache) GetTasksByTeam(ctx context.Context, teamID int64) ([]*entities.Task, error) {
 	m.ctrl.T.Helper()
@@ -111,6 +141,20 @@ func (m *MockCache) SetTask(ctx context.Context, task *entities.Task) error {
 func (mr *MockCacheMockRecorder) SetTask(ctx, task any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTask", reflect.TypeOf((*MockCache)(nil).SetTask), ctx, task)
+}
+
+// SetTasksByFilter mocks base method.
+func (m *MockCache) SetTasksByFilter(ctx context.Context, filter dto.TaskFilter, tasks []*entities.Task) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetTasksByFilter", ctx, filter, tasks)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetTasksByFilter indicates an expected call of SetTasksByFilter.
+func (mr *MockCacheMockRecorder) SetTasksByFilter(ctx, filter, tasks any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTasksByFilter", reflect.TypeOf((*MockCache)(nil).SetTasksByFilter), ctx, filter, tasks)
 }
 
 // SetTasksByTeam mocks base method.

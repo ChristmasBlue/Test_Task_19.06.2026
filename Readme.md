@@ -151,7 +151,7 @@ go test ./internal/cases -coverprofile=coverage.out
 go tool cover -html=coverage.out
 ```
 
-Покрытие: 85.4% (выше требования ТЗ).
+Покрытие: 86.9% (выше требования ТЗ).
 
 ## Интеграционные тесты
 ```bash

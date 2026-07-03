@@ -22,8 +22,8 @@ func (c *testConfig) LifeIdleConns() time.Duration            { return 5 * time.
 func (c *testConfig) MaxOpenConns() int                       { return 5 }
 func (c *testConfig) MaxIdleConns() int                       { return 2 }
 func (c *testConfig) LifeConns() time.Duration                { return 5 * time.Minute }
-func (c *testConfig) CacheHost() string                       { return "6379" }
-func (c *testConfig) CachePort() string                       { return "localhost" }
+func (c *testConfig) CacheHost() string                       { return "localhost" }
+func (c *testConfig) CachePort() int                          { return 6379 }
 func (c *testConfig) CacheTTL() time.Duration                 { return 5 * time.Minute }
 func (c *testConfig) CachePass() string                       { return "" }
 func (c *testConfig) CacheDB() int                            { return 0 }

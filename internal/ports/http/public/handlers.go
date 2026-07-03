@@ -117,6 +117,7 @@ func (s *Server) GetTeams(c *gin.Context) {
 // @Router /api/v1/teams/{id} [get]
 func (s *Server) GetTeamByID(c *gin.Context) {
 	slog.Info("GetTeamByID")
+	userID := c.GetInt64("user_id")
 	ctx := c.Request.Context()
 	teamID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -126,7 +127,7 @@ func (s *Server) GetTeamByID(c *gin.Context) {
 		return
 	}
 
-	team, err := s.Service.GetTeamByID(ctx, teamID)
+	team, err := s.Service.GetTeamByID(ctx, userID, teamID)
 	if err != nil {
 		err := errors.Wrap(err, "getting team failed")
 		slog.Error("GetTeamByID", "err", err)
@@ -267,6 +268,7 @@ func (s *Server) CreateTask(c *gin.Context) {
 func (s *Server) GetTaskByID(c *gin.Context) {
 	slog.Info("GetTaskByID")
 	ctx := c.Request.Context()
+	userID := c.GetInt64("user_id")
 	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		err := errors.Wrap(entities.ErrInvalidParam, "parsing task id failed")
@@ -275,7 +277,7 @@ func (s *Server) GetTaskByID(c *gin.Context) {
 		return
 	}
 
-	task, err := s.Service.GetTaskByID(ctx, taskID)
+	task, err := s.Service.GetTaskByID(ctx, userID, taskID)
 	if err != nil {
 		err := errors.Wrap(err, "getting task failed")
 		slog.Error("GetTaskByID", "err", err)
@@ -318,7 +320,7 @@ func (s *Server) UpdateTaskByID(c *gin.Context) {
 		s.errProcessing(err, c)
 		return
 	}
-	oldTask, err := s.Service.GetTaskByID(ctx, taskID)
+	oldTask, err := s.Service.GetTaskByID(ctx, userID, taskID)
 	if err != nil {
 		err := errors.Wrap(err, "getting task failed")
 		slog.Error("GetTaskByID", "err", err)
@@ -414,6 +416,7 @@ func (s *Server) AddComment(c *gin.Context) {
 func (s *Server) GetHistory(c *gin.Context) {
 	slog.Info("GetHistory")
 	ctx := c.Request.Context()
+	userID := c.GetInt64("user_id")
 
 	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -433,7 +436,7 @@ func (s *Server) GetHistory(c *gin.Context) {
 		offset = 0
 	}
 
-	history, err := s.Service.GetTaskHistory(ctx, taskID, limit, offset)
+	history, err := s.Service.GetTaskHistory(ctx, userID, taskID, limit, offset)
 	if err != nil {
 		err := errors.Wrap(err, "getting history failed")
 		slog.Error("GetHistory", "err", err)
@@ -458,6 +461,8 @@ func (s *Server) GetTeamMembers(c *gin.Context) {
 	slog.Info("GetTeamMembers")
 	ctx := c.Request.Context()
 
+	userID := c.GetInt64("user_id")
+
 	teamID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		err := errors.Wrap(entities.ErrInvalidParam, "parsing team id failed")
@@ -466,7 +471,7 @@ func (s *Server) GetTeamMembers(c *gin.Context) {
 		return
 	}
 
-	members, err := s.Service.GetTeamMembers(ctx, teamID)
+	members, err := s.Service.GetTeamMembers(ctx, userID, teamID)
 	if err != nil {
 		err := errors.Wrap(err, "getting team members failed")
 		slog.Error("GetTeamMembers", "err", err)
@@ -495,6 +500,8 @@ func (s *Server) GetTasksByTeam(c *gin.Context) {
 
 	slog.Info("Params", "all", c.Params)
 
+	userID := c.GetInt64("user_id")
+
 	teamID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		err := errors.Wrap(entities.ErrInvalidParam, "parsing team id failed")
@@ -516,7 +523,7 @@ func (s *Server) GetTasksByTeam(c *gin.Context) {
 		offset = 0
 	}
 
-	tasks, err := s.Service.GetTasksByTeam(ctx, teamID, limit, offset)
+	tasks, err := s.Service.GetTasksByTeam(ctx, userID, teamID, limit, offset)
 	if err != nil {
 		err := errors.Wrap(err, "getting tasks by team failed")
 		slog.Error("GetTasksByTeam", "err", err)
@@ -542,7 +549,7 @@ func (s *Server) GetTasksByTeam(c *gin.Context) {
 func (s *Server) GetCommentsByTask(c *gin.Context) {
 	slog.Info("GetCommentsByTask")
 	ctx := c.Request.Context()
-
+	userID := c.GetInt64("user_id")
 	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		err := errors.Wrap(entities.ErrInvalidParam, "parsing task id failed")
@@ -564,7 +571,7 @@ func (s *Server) GetCommentsByTask(c *gin.Context) {
 		offset = 0
 	}
 
-	comments, err := s.Service.GetCommentsByTask(ctx, taskID, limit, offset)
+	comments, err := s.Service.GetCommentsByTask(ctx, userID, taskID, limit, offset)
 	if err != nil {
 		err := errors.Wrap(err, "getting comments failed")
 		slog.Error("GetCommentsByTask", "err", err)

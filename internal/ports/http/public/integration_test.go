@@ -22,16 +22,18 @@ func setupHTTPServer(t *testing.T) (*gin.Engine, func()) {
 
 	gin.SetMode(gin.TestMode)
 
-	storage, err := ms.NewStorage(&testConfig{})
+	cfg := &testConfig{}
+
+	storage, err := ms.NewStorage(cfg)
 	require.NoError(t, err)
 
-	cache, err := redis.NewRedisCache(&testConfig{})
+	cache, err := redis.NewRedisCache(cfg)
 	require.NoError(t, err)
 
-	svc, err := cases.NewService(storage, cache, &testConfig{})
+	svc, err := cases.NewService(storage, cache, cfg)
 	require.NoError(t, err)
 
-	server, err := public.NewServer(svc, &testConfig{})
+	server, err := public.NewServer(svc, cfg)
 	require.NoError(t, err)
 
 	router := gin.New()
