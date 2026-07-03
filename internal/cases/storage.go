@@ -1,8 +1,10 @@
 package cases
 
+//go:generate go run go.uber.org/mock/mockgen@latest -source=storage.go -destination=mocks/repository_mock.go -package=mocks Repository
 import (
 	"context"
 	"test_task/internal/entities"
+	"test_task/pkg/dto"
 )
 
 // Repository — основной интерфейс репозитория
@@ -38,6 +40,7 @@ type Repository interface {
 	GetTaskByID(ctx context.Context, id int64) (*entities.Task, error)
 	GetTasksByTeam(ctx context.Context, teamID int64, limit, offset int) ([]*entities.Task, error)
 	UpdateTask(ctx context.Context, task *entities.Task) error
+	GetTasksByFilter(ctx context.Context, filter dto.TaskFilter) ([]*entities.Task, error)
 
 	// ========== TASK HISTORY ==========
 	AddHistoryRecord(ctx context.Context, record *entities.TaskHistory) error
@@ -46,4 +49,8 @@ type Repository interface {
 	// ========== TASK COMMENT ==========
 	AddComment(ctx context.Context, comment *entities.TaskComment) error
 	GetCommentsByTask(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskComment, error)
+
+	GetInvalidAssigneeTasks(ctx context.Context) ([]dto.InvalidAssigneeTask, error)
+	GetTeamStats(ctx context.Context) ([]dto.TeamStats, error)
+	GetTopCreators(ctx context.Context) ([]dto.TopCreator, error)
 }

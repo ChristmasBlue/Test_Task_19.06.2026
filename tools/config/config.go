@@ -17,4 +17,11 @@ type Config interface {
 	MaxOpenConns() int
 	MaxIdleConns() int
 	LifeConns() time.Duration
+	CacheHost() string
+	CachePort() int
+	CacheTTL() time.Duration
+	CachePass() string
+	CacheDB() int
+	RateLimiterRate() float64
+	RateLimiterBurst() int
 }

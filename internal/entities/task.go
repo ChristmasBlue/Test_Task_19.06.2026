@@ -7,14 +7,15 @@ import (
 )
 
 type Task struct {
-	ID          int64     `json:"id"`
-	AssigneeID  int64     `json:"assignee_id"`
-	OwnerID     int64     `json:"owner_id"`
-	TeamID      int64     `json:"team_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	CreateAt    time.Time `json:"create_at"`
+	ID          int64      `json:"id"`
+	AssigneeID  int64      `json:"assignee_id"`
+	OwnerID     int64      `json:"owner_id"`
+	TeamID      int64      `json:"team_id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	CreateAt    time.Time  `json:"create_at"`
+	CompleteAt  *time.Time `json:"complete_at"`
 }
 
 var (
@@ -81,6 +82,17 @@ func (task *Task) SetStatus(status string) error {
 	if !isValidTaskStatus(status) {
 		return errors.Wrap(ErrInvalidParam, "invalid task status")
 	}
+
+	if status == TaskStatusDone && task.Status != TaskStatusDone {
+		now := time.Now()
+		task.CompleteAt = &now
+	}
+
+	// ✅ Если статус меняется с "done" на что-то другое — очищаем completed_at
+	if task.Status == TaskStatusDone && status != TaskStatusDone {
+		task.CompleteAt = nil
+	}
+
 	task.Status = status
 	return nil
 }
@@ -99,6 +111,10 @@ func (task *Task) SetAssigneeID(assigneeID int64) {
 
 func (task *Task) SetID(id int64) {
 	task.ID = id
+}
+
+func (task *Task) SetCompeteAt(completeAt *time.Time) {
+	task.CompleteAt = completeAt
 }
 
 func isValidTaskStatus(status string) bool {

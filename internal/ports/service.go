@@ -1,5 +1,7 @@
 package ports
 
+//go:generate mockgen -source=service.go -destination=mocks/service_mock.go -package=mocks
+
 import (
 	"context"
 	"test_task/internal/entities"
@@ -27,6 +29,7 @@ type Service interface {
 	GetTaskByID(ctx context.Context, taskID int64) (*entities.Task, error)
 	GetTasksByTeam(ctx context.Context, teamID int64, limit, offset int) ([]*entities.Task, error)
 	UpdateTask(ctx context.Context, userID int64, task *entities.Task) error
+	GetTasksByFilter(ctx context.Context, userID int64, filter dto.TaskFilter) ([]*entities.Task, error)
 
 	// ========== COMMENT ==========
 	AddComment(ctx context.Context, userID, taskID int64, content string) (*entities.TaskComment, error)
@@ -34,4 +37,8 @@ type Service interface {
 
 	// ========== HISTORY ==========
 	GetTaskHistory(ctx context.Context, taskID int64, limit, offset int) ([]*entities.TaskHistory, error)
+
+	GetInvalidAssigneeTasks(ctx context.Context) ([]dto.InvalidAssigneeTask, error)
+	GetTeamStats(ctx context.Context) ([]dto.TeamStats, error)
+	GetTopCreators(ctx context.Context) ([]dto.TopCreator, error)
 }

@@ -1,20 +1,29 @@
 http:
   port: 8080
-  timeout: 3s
+  timeout: 10s
 storage:
-  connection_string: root:1124@tcp(localhost:3306)/taskmanager?parseTime=true&charset=utf8mb4
+  connection_string: root:root@tcp(mysql:3306)/taskmanager?parseTime=true&charset=utf8mb4
   max_conns: 25
   max_idle_conns: 5
   time_life_conns: 1m
   time_life_idle_conns: 5m
+cache:
+  host: redis
+  port: 6379
+  ttl: 5m
+  db: 0
+  password: ""
 logger:
   level: info
   add_source: true
 metrics:
-  port: 8083
+  port: 9090
   timeout: 3s
 gracefull_shutdown:
   timeout: 5s
 token:
   secret: my-super-secret-key
   duration: 24h
+limiter:
+  rate: 100
+  burst: 100

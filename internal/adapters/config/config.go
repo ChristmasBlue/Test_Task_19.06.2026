@@ -79,3 +79,31 @@ func (c *Config) MaxIdleConns() int {
 func (c *Config) LifeConns() time.Duration {
 	return c.Duration("storage.time_life_conns")
 }
+
+func (c *Config) CacheHost() string {
+	return c.Koanf.String("cache.host")
+}
+
+func (c *Config) CachePort() int {
+	return c.Koanf.Int("cache.port")
+}
+
+func (c *Config) CacheTTL() time.Duration {
+	return c.Duration("cache.ttl")
+}
+
+func (c *Config) CachePass() string {
+	return c.Koanf.String("cache.password")
+}
+
+func (c *Config) CacheDB() int {
+	return c.Koanf.Int("cache.db")
+}
+
+func (c *Config) RateLimiterRate() float64 {
+	return c.Koanf.Float64("limiter.rate")
+}
+
+func (c *Config) RateLimiterBurst() int {
+	return c.Koanf.Int("limiter.burst")
+}

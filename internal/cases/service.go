@@ -2,6 +2,7 @@ package cases
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"test_task/internal/entities"
 	"test_task/pkg/dto"
@@ -14,12 +15,17 @@ import (
 
 type Service struct {
 	Storage Repository
+	Cache   Cache
 	Config  config.Config
 }
 
-func NewService(storage Repository, cfg config.Config) (*Service, error) {
+func NewService(storage Repository, caсhe Cache, cfg config.Config) (*Service, error) {
 	if storage == nil {
 		return nil, errors.Wrap(entities.ErrInvalidParam, "storage not set")
+	}
+
+	if caсhe == nil {
+		return nil, errors.Wrap(entities.ErrInvalidParam, "cahce not set")
 	}
 
 	if cfg == nil {
@@ -28,6 +34,7 @@ func NewService(storage Repository, cfg config.Config) (*Service, error) {
 
 	return &Service{
 		Storage: storage,
+		Cache:   caсhe,
 		Config:  cfg,
 	}, nil
 }
@@ -176,6 +183,9 @@ func (s *Service) AddMember(ctx context.Context, userID, teamID, memberID int64,
 	err = s.Storage.AddMember(ctx, memberID, teamID, role)
 
 	if err != nil {
+		if errors.Is(err, entities.ErrConflict) {
+			return errors.Wrap(entities.ErrConflict, "user already in team")
+		}
 		slog.Error("AddMember", "err", err)
 		return errors.Wrap(err, "failed to add member")
 	}
@@ -330,6 +340,14 @@ func (s *Service) CreateTask(ctx context.Context, userID, assigneeID, teamID int
 		return nil, errors.Wrap(err, "create task failed")
 	}
 
+	if err := s.Cache.SetTask(ctx, task); err != nil {
+		slog.Warn("Failed to cache task", "task_id", task.GetID(), "err", err)
+	}
+
+	if err := s.Cache.DeleteTasksByTeam(ctx, teamID); err != nil {
+		slog.Warn("Failed to invalidate team tasks cache", "team_id", teamID, "err", err)
+	}
+
 	return task, nil
 }
 
@@ -340,10 +358,20 @@ func (s *Service) GetTaskByID(ctx context.Context, taskID int64) (*entities.Task
 		return nil, errors.Wrap(entities.ErrInvalidParam, "taskID is invalid")
 	}
 
+	cachedTask, err := s.Cache.GetTask(ctx, taskID)
+	if err == nil && cachedTask != nil {
+		slog.Info("Task from cache", "task_id", taskID)
+		return cachedTask, nil
+	}
+
 	task, err := s.Storage.GetTaskByID(ctx, taskID)
 	if err != nil {
 		slog.Error("GetTaskByID", "err", err)
 		return nil, errors.Wrap(err, "get task failed")
+	}
+
+	if err := s.Cache.SetTask(ctx, task); err != nil {
+		slog.Warn("Failed to cache task", "task_id", taskID, "err", err)
 	}
 
 	return task, nil
@@ -351,12 +379,31 @@ func (s *Service) GetTaskByID(ctx context.Context, taskID int64) (*entities.Task
 
 func (s *Service) GetTasksByTeam(ctx context.Context, teamID int64, limit, offset int) ([]*entities.Task, error) {
 	slog.Info("GetTasksByTeam")
-	tasks, err := s.Storage.GetTasksByTeam(ctx, teamID, limit, offset)
+
+	filter := dto.TaskFilter{
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	cachedTasks, err := s.Cache.GetTasksByTeam(ctx, teamID)
+	if err == nil && cachedTasks != nil {
+		slog.Info("Tasks from cache", "team_id", teamID, "count", len(cachedTasks))
+		return s.filterTasks(cachedTasks, filter), nil
+	}
+
+	tasks, err := s.Storage.GetTasksByTeam(ctx, teamID, 0, 0)
 	if err != nil {
 		slog.Error("GetTasksByTeam", "err", err)
 		return nil, errors.Wrap(err, "get tasks failed")
 	}
-	return tasks, nil
+
+	if len(tasks) > 0 {
+		if err := s.Cache.SetTasksByTeam(ctx, teamID, tasks); err != nil {
+			slog.Warn("Failed to cache tasks", "team_id", teamID, "err", err)
+		}
+	}
+
+	return s.filterTasks(tasks, filter), nil
 }
 
 func (s *Service) UpdateTask(ctx context.Context, userID int64, task *entities.Task) error {
@@ -376,11 +423,6 @@ func (s *Service) UpdateTask(ctx context.Context, userID int64, task *entities.T
 		return errors.Wrap(err, "failed to get task")
 	}
 
-	slog.Info("Assignee check",
-		"old_assignee", oldTask.AssigneeID,
-		"new_assignee", task.AssigneeID,
-	)
-
 	if task.AssigneeID == 0 {
 		task.AssigneeID = oldTask.AssigneeID
 	}
@@ -396,12 +438,30 @@ func (s *Service) UpdateTask(ctx context.Context, userID int64, task *entities.T
 	if task.Status == "" {
 		task.Status = oldTask.Status
 	}
+
 	task.TeamID = oldTask.TeamID
 	task.ID = oldTask.ID
 	task.OwnerID = oldTask.OwnerID
 	task.CreateAt = oldTask.CreateAt
 
 	var historyRecords []*entities.TaskHistory
+
+	if oldTask.AssigneeID != task.AssigneeID {
+		oldVal := fmt.Sprintf("%d", oldTask.AssigneeID)
+		newVal := fmt.Sprintf("%d", task.AssigneeID)
+		record, err := entities.NewTaskHistory(
+			task.GetID(),
+			userID,
+			"assignee",
+			&oldVal,
+			&newVal,
+			time.Now(),
+		)
+		if err != nil {
+			return errors.Wrap(err, "create history record failed")
+		}
+		historyRecords = append(historyRecords, record)
+	}
 
 	if oldTask.Title != task.Title {
 		record, err := entities.NewTaskHistory(
@@ -474,6 +534,14 @@ func (s *Service) UpdateTask(ctx context.Context, userID int64, task *entities.T
 	if err != nil {
 		slog.Error("UpdateTask", "err", err)
 		return err
+	}
+
+	if err := s.Cache.SetTask(ctx, task); err != nil {
+		slog.Warn("Failed to update task cache", "task_id", task.GetID(), "err", err)
+	}
+
+	if err := s.Cache.DeleteTasksByTeam(ctx, task.TeamID); err != nil {
+		slog.Warn("Failed to invalidate team tasks cache", "team_id", task.TeamID, "err", err)
 	}
 
 	return nil
@@ -559,4 +627,128 @@ func (s *Service) GetTaskHistory(ctx context.Context, taskID int64, limit, offse
 	return history, nil
 }
 
-//GetTasksByFilters() error
+func (s *Service) GetTasksByFilter(ctx context.Context, userID int64, filter dto.TaskFilter) ([]*entities.Task, error) {
+	slog.Info("GetTasksByFilter")
+
+	if len(filter.TeamIDs) == 0 {
+		teamIDs, err := s.Storage.GetUserTeams(ctx, userID)
+		if err != nil {
+			slog.Error("GetUserTeams", "err", err)
+			return nil, errors.Wrap(err, "failed to get user teams")
+		}
+
+		if len(teamIDs) == 0 {
+			slog.Info("User has no teams", "user_id", userID)
+			return []*entities.Task{}, nil
+		}
+
+		filter.TeamIDs = teamIDs
+	} else {
+		isMember, err := s.Storage.IsMember(ctx, userID, filter.TeamIDs[0])
+		if err != nil {
+			slog.Error("IsMember", "err", err)
+			return nil, errors.Wrap(err, "failed to check membership")
+		}
+		if !isMember {
+			return nil, errors.Wrap(entities.ErrInvalidParam, "user is not a member of this team")
+		}
+	}
+
+	if len(filter.TeamIDs) != 1 {
+		tasks, err := s.Storage.GetTasksByFilter(ctx, filter)
+		if err != nil {
+			slog.Error("GetTasks", "err", err)
+			return nil, errors.Wrap(err, "failed to get tasks")
+		}
+		return tasks, nil
+	}
+
+	if tasks, err := s.Cache.GetTasksByTeam(ctx, filter.TeamIDs[0]); err == nil && tasks != nil {
+		tasks = s.filterTasks(tasks, filter)
+		return tasks, nil
+	}
+
+	tasks, err := s.Storage.GetTasksByTeam(ctx, filter.TeamIDs[0], 0, 0)
+	if err != nil {
+		slog.Error("GetTasksByFilter", "err", err)
+		return nil, errors.Wrap(err, "failed to get tasks")
+	}
+
+	err = s.Cache.SetTasksByTeam(ctx, filter.TeamIDs[0], tasks)
+	if err != nil {
+		slog.Error("SetTasksByFilter", "err", err)
+	}
+
+	return s.filterTasks(tasks, filter), nil
+}
+
+func (s *Service) GetTeamStats(ctx context.Context) ([]dto.TeamStats, error) {
+	slog.Info("GetTeamStats")
+	stats, err := s.Storage.GetTeamStats(ctx)
+	if err != nil {
+		slog.Error("GetTeamStats", "err", err)
+		return nil, errors.Wrap(err, "get team stats failed")
+	}
+
+	return stats, nil
+}
+
+func (s *Service) GetTopCreators(ctx context.Context) ([]dto.TopCreator, error) {
+	slog.Info("GetTopCreators")
+	topCreators, err := s.Storage.GetTopCreators(ctx)
+	if err != nil {
+		slog.Error("GetTopCreators", "err", err)
+		return nil, errors.Wrap(err, "get top creators failed")
+	}
+
+	return topCreators, nil
+}
+
+func (s *Service) GetInvalidAssigneeTasks(ctx context.Context) ([]dto.InvalidAssigneeTask, error) {
+	slog.Info("GetInvalidAssigneeTasks")
+
+	tasks, err := s.Storage.GetInvalidAssigneeTasks(ctx)
+	if err != nil {
+		slog.Error("GetInvalidAssigneeTasks", "err", err)
+		return nil, errors.Wrap(err, "get invalid assignee tasks failed")
+	}
+
+	return tasks, nil
+}
+
+func (s *Service) filterTasks(tasks []*entities.Task, filter dto.TaskFilter) []*entities.Task {
+	var result []*entities.Task
+
+	for _, task := range tasks {
+		// Фильтр по статусу
+		if filter.Status != nil && *filter.Status != "" {
+			if task.Status != *filter.Status {
+				continue
+			}
+		}
+
+		// Фильтр по исполнителю
+		if filter.AssigneeID != nil {
+			if task.AssigneeID != *filter.AssigneeID {
+				continue
+			}
+		}
+
+		result = append(result, task)
+	}
+
+	// Применяем пагинацию
+	if filter.Limit > 0 {
+		start := filter.Offset
+		end := filter.Offset + filter.Limit
+		if start > len(result) {
+			return []*entities.Task{}
+		}
+		if end > len(result) {
+			end = len(result)
+		}
+		result = result[start:end]
+	}
+
+	return result
+}

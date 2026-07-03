@@ -1,0 +1,806 @@
+basePath: /api/v1
+definitions:
+  dto.CommentRequest:
+    properties:
+      comment:
+        maxLength: 1000
+        minLength: 1
+        type: string
+    required:
+    - comment
+    type: object
+  dto.ErrorDTO:
+    properties:
+      message:
+        type: string
+      status_code:
+        type: integer
+    type: object
+  dto.InvalidAssigneeTask:
+    properties:
+      assignee_id:
+        type: integer
+      assignee_name:
+        type: string
+      task_id:
+        type: integer
+      task_title:
+        type: string
+      team_id:
+        type: integer
+      team_name:
+        type: string
+    type: object
+  dto.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 8
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  dto.RegisterRequest:
+    properties:
+      email:
+        type: string
+      name:
+        maxLength: 50
+        minLength: 3
+        type: string
+      password:
+        minLength: 8
+        type: string
+    required:
+    - email
+    - name
+    - password
+    type: object
+  dto.TaskRequest:
+    properties:
+      assignee_id:
+        description: ← binding:"required"
+        type: integer
+      description:
+        description: ← binding:"required"
+        type: string
+      team_id:
+        description: ← binding:"required"
+        type: integer
+      title:
+        description: ← binding:"required"
+        type: string
+    type: object
+  dto.TeamInviteRequest:
+    properties:
+      role:
+        enum:
+        - member
+        - admin
+        type: string
+      user_id:
+        type: integer
+    required:
+    - user_id
+    type: object
+  dto.TeamRequest:
+    properties:
+      invite_user_id:
+        type: integer
+      name:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  dto.TeamStats:
+    properties:
+      done_tasks_last_7_days:
+        type: integer
+      member_count:
+        type: integer
+      team_id:
+        type: integer
+      team_name:
+        type: string
+    type: object
+  dto.TeamWithRole:
+    properties:
+      create_at:
+        type: string
+      id:
+        type: integer
+      member_ids:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+      owner_id:
+        type: integer
+      role:
+        type: string
+      task_ids:
+        items:
+          type: integer
+        type: array
+    type: object
+  dto.TopCreator:
+    properties:
+      rank:
+        type: integer
+      task_count:
+        type: integer
+      team_id:
+        type: integer
+      team_name:
+        type: string
+      user_id:
+        type: integer
+      user_name:
+        type: string
+    type: object
+  dto.UpdateTaskRequest:
+    properties:
+      description:
+        maxLength: 1000
+        minLength: 3
+        type: string
+      status:
+        enum:
+        - todo
+        - in_progress
+        - done
+        type: string
+      title:
+        maxLength: 255
+        minLength: 3
+        type: string
+    type: object
+  entities.Task:
+    properties:
+      assignee_id:
+        type: integer
+      complete_at:
+        type: string
+      create_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      owner_id:
+        type: integer
+      status:
+        type: string
+      team_id:
+        type: integer
+      title:
+        type: string
+    type: object
+  entities.TaskComment:
+    properties:
+      content:
+        type: string
+      create_at:
+        type: string
+      task_id:
+        description: ID        int64     `json:"id"`
+        type: integer
+      user_id:
+        type: integer
+    type: object
+  entities.TaskHistory:
+    properties:
+      change_at:
+        type: string
+      change_by:
+        type: integer
+      field:
+        type: string
+      new_value:
+        type: string
+      old_value:
+        type: string
+      task_id:
+        description: ID        int64     `json:"id"`
+        type: integer
+    type: object
+  entities.TeamMember:
+    properties:
+      role:
+        type: string
+      team_id:
+        type: integer
+      user_id:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API для управления задачами в командах
+  title: Task Manager API
+  version: "1.0"
+paths:
+  /api/v1/login:
+    post:
+      consumes:
+      - application/json
+      description: Аутентификация пользователя и получение JWT токена
+      parameters:
+      - description: Данные для входа
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"token":"jwt_token","user":1}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверные данные
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      summary: Вход в систему
+      tags:
+      - Auth
+  /api/v1/register:
+    post:
+      consumes:
+      - application/json
+      description: Создаёт нового пользователя в системе
+      parameters:
+      - description: Данные для регистрации
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"message":"success","user_id":1}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      summary: Регистрация пользователя
+      tags:
+      - Auth
+  /api/v1/reports/invalid-assignee:
+    get:
+      description: Возвращает задачи, где исполнитель не является членом команды
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Задачи с невалидным исполнителем
+          schema:
+            items:
+              $ref: '#/definitions/dto.InvalidAssigneeTask'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Задачи с невалидным исполнителем
+      tags:
+      - Reports
+  /api/v1/reports/team-stats:
+    get:
+      description: 'Возвращает статистику по каждой команде: количество участников
+        и выполненных задач за 7 дней'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Статистика по командам
+          schema:
+            items:
+              $ref: '#/definitions/dto.TeamStats'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Статистика по командам
+      tags:
+      - Reports
+  /api/v1/reports/top-creators:
+    get:
+      description: Возвращает топ-3 пользователей по количеству созданных задач в
+        каждой команде за месяц
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Топ создателей задач
+          schema:
+            items:
+              $ref: '#/definitions/dto.TopCreator'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Топ создателей задач
+      tags:
+      - Reports
+  /api/v1/tasks:
+    get:
+      description: Возвращает задачи с фильтрацией по команде, статусу, исполнителю
+        и пагинацией
+      parameters:
+      - description: ID команды
+        in: query
+        name: team_id
+        type: integer
+      - description: Статус задачи (todo, in_progress, done)
+        in: query
+        name: status
+        type: string
+      - description: ID исполнителя
+        in: query
+        name: assignee_id
+        type: integer
+      - description: Количество записей (по умолчанию 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Смещение (по умолчанию 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список задач
+          schema:
+            items:
+              $ref: '#/definitions/entities.Task'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Список задач с фильтрацией
+      tags:
+      - Tasks
+    post:
+      consumes:
+      - application/json
+      description: Создаёт новую задачу в указанной команде
+      parameters:
+      - description: Данные задачи
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.TaskRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"message":"success","task":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Создание задачи
+      tags:
+      - Tasks
+  /api/v1/tasks/{id}:
+    get:
+      description: Возвращает задачу по её идентификатору
+      parameters:
+      - description: ID задачи
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"task":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Задача не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Получение задачи по ID
+      tags:
+      - Tasks
+    put:
+      consumes:
+      - application/json
+      description: Обновляет задачу (можно менять title, description, status)
+      parameters:
+      - description: ID задачи
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Данные для обновления
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"message":"success","task":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Задача не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Обновление задачи
+      tags:
+      - Tasks
+  /api/v1/tasks/{id}/comments:
+    get:
+      description: Возвращает все комментарии к задаче с пагинацией
+      parameters:
+      - description: ID задачи
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Количество записей (по умолчанию 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Смещение (по умолчанию 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список комментариев
+          schema:
+            items:
+              $ref: '#/definitions/entities.TaskComment'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Задача не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Получение комментариев к задаче
+      tags:
+      - Comments
+    post:
+      consumes:
+      - application/json
+      description: Добавляет комментарий к задаче (только член команды)
+      parameters:
+      - description: ID задачи
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Текст комментария
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CommentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"message":"success","task":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Добавление комментария к задаче
+      tags:
+      - Comments
+  /api/v1/tasks/{id}/history:
+    get:
+      description: Возвращает историю изменений задачи с пагинацией
+      parameters:
+      - description: ID задачи
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Количество записей (по умолчанию 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Смещение (по умолчанию 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список изменений
+          schema:
+            items:
+              $ref: '#/definitions/entities.TaskHistory'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Задача не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: История изменений задачи
+      tags:
+      - History
+  /api/v1/teams:
+    get:
+      description: Возвращает все команды, в которых состоит пользователь, с его ролью
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список команд с ролью
+          schema:
+            items:
+              $ref: '#/definitions/dto.TeamWithRole'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Список команд пользователя
+      tags:
+      - Teams
+    post:
+      consumes:
+      - application/json
+      description: Создаёт новую команду и назначает создателя владельцем
+      parameters:
+      - description: Название команды
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.TeamRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"team":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Создание команды
+      tags:
+      - Teams
+  /api/v1/teams/{id}:
+    get:
+      description: Возвращает информацию о команде
+      parameters:
+      - description: ID команды
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"team":{...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Команда не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Получение команды по ID
+      tags:
+      - Teams
+  /api/v1/teams/{id}/invite:
+    post:
+      consumes:
+      - application/json
+      description: Добавляет пользователя в команду (только owner/admin)
+      parameters:
+      - description: ID команды
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: ID пользователя и роль
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.TeamInviteRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"message":"success","user_id":2}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверный запрос
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "403":
+          description: Недостаточно прав
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Пригласить пользователя в команду
+      tags:
+      - Teams
+  /api/v1/teams/{id}/members:
+    get:
+      description: Возвращает всех участников команды с их ролями
+      parameters:
+      - description: ID команды
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список участников
+          schema:
+            items:
+              $ref: '#/definitions/entities.TeamMember'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Команда не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Список участников команды
+      tags:
+      - Teams
+  /api/v1/teams/{id}/tasks:
+    get:
+      description: Возвращает все задачи указанной команды с пагинацией
+      parameters:
+      - description: ID команды
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Количество записей (по умолчанию 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Смещение (по умолчанию 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список задач
+          schema:
+            items:
+              $ref: '#/definitions/entities.Task'
+            type: array
+        "401":
+          description: Неавторизован
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+        "404":
+          description: Команда не найдена
+          schema:
+            $ref: '#/definitions/dto.ErrorDTO'
+      security:
+      - ApiKeyAuth: []
+      summary: Задачи команды
+      tags:
+      - Tasks
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
